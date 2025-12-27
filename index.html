@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ABDI OS 8.0 | FINAL BOSS</title>
+    
+    <!-- EXTERNAL ASSETS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- CUSTOM FONTS -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;700&family=Permanent+Marker&display=swap');
+
+        :root {
+            --neon-cyan: #00f3ff;
+            --neon-pink: #ff00ff;
+            --hud-bg: rgba(5, 5, 10, 0.9);
+        }
+
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Chakra Petch', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* --- MAP STYLING (DARK MODE + NEON) --- */
+        #map-layer {
+            position: absolute; inset: 0; z-index: 0;
+            background: #050505;
+        }
+        .leaflet-layer, .leaflet-control-zoom-in, .leaflet-control-zoom-out, .leaflet-control-attribution {
+            filter: invert(100%) hue-rotate(180deg) brightness(0.7) contrast(1.5) saturate(0.3);
+        }
+        /* CAR MARKER */
+        .driver-icon {
+            font-size: 28px;
+            color: var(--neon-cyan);
+            filter: drop-shadow(0 0 10px var(--neon-cyan));
+            transition: transform 0.1s linear;
+        }
+
+        /* --- HUD ELEMENTS --- */
+        .glass-hud {
+            background: var(--hud-bg);
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(12px);
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.15);
+            clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+        }
+
+        /* SCANLINES OVERLAY */
+        .crt-overlay {
+            position: fixed; inset: 0; pointer-events: none; z-index: 40;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+            background-size: 100% 4px;
+            box-shadow: inset 0 0 80px rgba(0,0,0,0.8);
+        }
+
+        /* SPEEDOMETER GLOW */
+        .speed-glow { text-shadow: 0 0 20px var(--neon-cyan); }
+        .redline-glow { text-shadow: 0 0 30px #ff0000; color: #ff0000 !important; }
+
+        /* GAS PEDAL ANIMATION */
+        #gas-btn {
+            background: linear-gradient(180deg, #1a1a1a 0%, #000 100%);
+            border-bottom: 6px solid #333;
+            transition: all 0.05s;
+        }
+        #gas-btn:active {
+            transform: translateY(4px) scale(0.98);
+            border-bottom: 2px solid #ff0000;
+            box-shadow: inset 0 0 40px #ff0000;
+        }
+
+        /* NITRO WARP EFFECT (CSS ONLY) */
+        .warp-lines {
+            position: fixed; inset: 0; pointer-events: none; z-index: 10;
+            background: repeating-linear-gradient(90deg, transparent 0, transparent 50px, rgba(0, 243, 255, 0.05) 50px, rgba(0, 243, 255, 0.05) 51px);
+            opacity: 0; transition: opacity 0.5s;
+        }
+        .nitro-active .warp-lines { opacity: 1; animation: warp-move 0.1s infinite linear; }
+        @keyframes warp-move { from { transform: translateX(0); } to { transform: translateX(-50px); } }
+
+    </style>
+</head>
+<body>
+
+    <!-- LAYERS -->
+    <div id="map-layer"></div>
+    <div class="warp-lines"></div>
+    <div class="crt-overlay"></div>
+
+    <!-- BOOT SCREEN -->
+    <div id="boot" class="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center space-y-6">
+        <h1 class="text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 animate-pulse tracking-tighter">
+            ABDI_OS <span class="text-xs align-top text-gray-500">v8.0</span>
+        </h1>
+        <div class="flex flex-col items-center text-xs font-mono text-cyan-500/70">
+            <p>> MOUNTING VIRTUAL ENGINE...</p>
+            <p>> HACKING GOOGLE SATELLITES...</p>
+            <p>> LOADING ORTEN_SLANG.JSON...</p>
+        </div>
+        <button onclick="app.start()" class="mt-8 px-12 py-4 border border-cyan-500 text-cyan-500 hover:bg-cyan-500 hover:text-black transition-all uppercase font-bold tracking-widest clip-path-polygon">
+            [ START SYSTEM ]
+        </button>
+    </div>
+
+    <!-- UI CONTAINER -->
+    <div class="fixed inset-0 z-50 flex flex-col justify-between p-4 pointer-events-none">
+        
+        <!-- HEADER -->
+        <header class="flex justify-between items-start pointer-events-auto">
+            <!-- PROFILE -->
+            <div class="glass-hud p-3 w-64 flex items-center gap-4">
+                <div class="relative group cursor-pointer" onclick="app.voice.speak('Rör inte mitt ansikte bror.')">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=AbdiBoss&backgroundColor=111&accessories=sunglasses&clothing=hoodie&skinColor=brown" 
+                         class="w-14 h-14 rounded-md border border-cyan-500">
+                    <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-ping"></div>
+                </div>
+                <div>
+                    <h3 class="text-white font-bold text-lg leading-none">ABDI</h3>
+                    <p id="abdi-status" class="text-[10px] text-cyan-400 mt-1 font-mono">READY TO RACE</p>
+                </div>
+            </div>
+
+            <!-- DASHBOARD -->
+            <div class="text-right pointer-events-none">
+                <div class="flex items-end justify-end gap-2">
+                    <span id="gear-ui" class="text-4xl font-mono text-yellow-500 font-bold">N</span>
+                    <h1 id="speed-ui" class="text-7xl font-bold italic text-white speed-glow leading-none">0</h1>
+                </div>
+                <div class="w-48 h-2 bg-gray-800 mt-1 rounded-full overflow-hidden ml-auto">
+                    <div id="rpm-bar" class="h-full bg-gradient-to-r from-cyan-500 via-yellow-400 to-red-600 w-0 transition-all duration-75"></div>
+                </div>
+                <p class="text-[9px] text-gray-400 mt-1 tracking-widest">V8 TWIN TURBO ENGINE</p>
+            </div>
+        </header>
+
+        <!-- CENTER NAVIGATION -->
+        <div id="gps-hint" class="absolute top-24 left-1/2 -translate-x-1/2 bg-black/80 border-b-2 border-cyan-500 text-white px-6 py-2 rounded-t-lg hidden">
+            <i class="fas fa-route text-cyan-500 mr-2"></i> <span id="gps-text">Rerouting...</span>
+        </div>
+
+        <!-- FOOTER CONTROLS -->
+        <footer class="pointer-events-auto grid grid-cols-[1fr_1.5fr_1fr] gap-4 items-end pb-6">
+            
+            <!-- LEFT: TRANSMISSION -->
+            <div class="glass-hud p-4 flex flex-col justify-center gap-3">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-[10px] text-gray-400">MODE</span>
+                    <button id="auto-btn" onclick="app.toggleAuto()" class="text-[10px] font-bold px-2 py-1 bg-gray-800 text-gray-400 rounded border border-gray-600">MANUAL</button>
+                </div>
+                <button onclick="app.shift(1)" class="w-full bg-cyan-900/30 hover:bg-cyan-500/20 border border-cyan-500/50 text-cyan-300 py-3 rounded text-xs font-bold active:scale-95 transition-transform">
+                    <i class="fas fa-chevron-up"></i> UPP
+                </button>
+                <button onclick="app.shift(-1)" class="w-full bg-cyan-900/30 hover:bg-cyan-500/20 border border-cyan-500/50 text-cyan-300 py-3 rounded text-xs font-bold active:scale-95 transition-transform">
+                    <i class="fas fa-chevron-down"></i> NER
+                </button>
+            </div>
+
+            <!-- CENTER: GAS -->
+            <button id="gas-btn"
+                onmousedown="app.gas(true)" onmouseup="app.gas(false)" onmouseleave="app.gas(false)"
+                ontouchstart="app.gas(true)" ontouchend="app.gas(false)" oncontextmenu="return false;"
+                class="h-40 rounded-t-xl flex flex-col items-center justify-center relative overflow-hidden group">
+                <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
+                <i class="fas fa-tachometer-alt text-4xl text-gray-500 group-active:text-red-500 transition-colors z-10"></i>
+                <span class="text-2xl font-black italic mt-2 z-10 group-active:scale-110 transition-transform">GASA</span>
+                <div class="absolute bottom-0 w-full h-1 bg-red-600 scale-x-0 group-active:scale-x-100 transition-transform duration-150"></div>
+            </button>
+
+            <!-- RIGHT: EXTRAS -->
+            <div class="glass-hud p-4 flex flex-col justify-between gap-2 h-full">
+                <button onclick="app.map.toggleLayer()" class="flex-1 bg-gray-800 rounded border border-gray-700 flex items-center justify-center gap-2 active:bg-cyan-900">
+                    <i class="fas fa-layer-group text-cyan-500"></i>
+                    <span class="text-[10px]">MAP STYLE</span>
+                </button>
+                <button onclick="app.voice.honk()" class="flex-1 bg-gray-800 rounded border border-gray-700 flex items-center justify-center gap-2 active:bg-red-900">
+                    <i class="fas fa-bullhorn text-red-500"></i>
+                    <span class="text-[10px]">DOMINERA</span>
+                </button>
+            </div>
+
+        </footer>
+    </div>
+
+    <script>
+        /**
+         * ABDI OS 8.0 - THE CORE ENGINE
+         * An Object-Oriented approach for maximum cleanliness and GitHub readiness.
+         */
+
+        // --- AUDIO ENGINE ---
+        class AudioManager {
+            constructor() {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                this.masterGain = this.ctx.createGain();
+                this.masterGain.gain.value = 0.3; // Safe volume
+                this.masterGain.connect(this.ctx.destination);
+                
+                this.engineOsc = null;
+                this.bassOsc = null;
+                this.noiseNode = null;
+                this.isEngineOn = false;
+            }
+
+            ignite() {
+                if(this.ctx.state === 'suspended') this.ctx.resume();
+                
+                // Main Engine (Sawtooth for growl)
+                this.engineOsc = this.ctx.createOscillator();
+                this.engineOsc.type = 'sawtooth';
+                this.engineOsc.frequency.value = 60; // Idle
+                
+                // Bass (Subwoofer feel)
+                this.bassOsc = this.ctx.createOscillator();
+                this.bassOsc.type = 'sine';
+                this.bassOsc.frequency.value = 40;
+                
+                // Filter (Muffles engine at low RPM)
+                this.filter = this.ctx.createBiquadFilter();
+                this.filter.type = 'lowpass';
+                this.filter.frequency.value = 400;
+
+                // Routing
+                this.engineOsc.connect(this.filter);
+                this.bassOsc.connect(this.filter);
+                this.filter.connect(this.masterGain);
+
+                this.engineOsc.start();
+                this.bassOsc.start();
+                this.isEngineOn = true;
+            }
+
+            updateRPM(rpm) {
+                if(!this.isEngineOn) return;
+                
+                // Pitch modulation
+                const pitch = 60 + (rpm / 15);
+                this.engineOsc.frequency.setTargetAtTime(pitch, this.ctx.currentTime, 0.1);
+                
+                // Filter opens up at high RPM (Screaming engine)
+                const filterFreq = 400 + (rpm / 2);
+                this.filter.frequency.setTargetAtTime(filterFreq, this.ctx.currentTime, 0.1);
+                
+                // Sub-bass rumble
+                this.bassOsc.frequency.setTargetAtTime(pitch / 2, this.ctx.currentTime, 0.1);
+            }
+
+            honk() {
+                if(!this.isEngineOn) return;
+                const osc = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(100, this.ctx.currentTime + 0.3);
+                g.gain.value = 0.5;
+                osc.connect(g);
+                g.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            }
+        }
+
+        // --- VOICE / TTS MANAGER ---
+        class VoiceManager {
+            constructor() {
+                this.synth = window.speechSynthesis;
+                this.voices = [];
+                window.speechSynthesis.onvoiceschanged = () => {
+                    this.voices = this.synth.getVoices();
+                };
+            }
+
+            speak(text, priority = false) {
+                if(this.synth.speaking && !priority) return;
+                this.synth.cancel();
+
+                // "Orten" Phonetic Dictionary
+                let phonetic = text
+                    .replace(/bror/gi, "brooor")
+                    .replace(/kungen/gi, "konngen")
+                    .replace(/polisen/gi, "Ajj-nah")
+                    .replace(/växla/gi, "veck-sla");
+
+                const u = new SpeechSynthesisUtterance(phonetic);
+                u.lang = 'sv-SE';
+                u.pitch = 0.65; // Deep / Manly
+                u.rate = 1.1;   // Fast / Aggressive
+                
+                // Try to find a good male voice
+                const voice = this.voices.find(v => (v.name.includes("Male") || v.name.includes("Jakob")) && v.lang.includes("sv")) || this.voices[0];
+                if(voice) u.voice = voice;
+
+                // Update UI text
+                const status = document.getElementById('abdi-status');
+                status.innerText = text.toUpperCase();
+                status.classList.add('text-white');
+                setTimeout(() => status.classList.remove('text-white'), 500);
+
+                this.synth.speak(u);
+            }
+
+            honk() {
+                const taunts = ["Flytta på dig svenne!", "Ur vägen!", "TUUUUUT!", "Jag äger gatan!"];
+                this.speak(taunts[Math.floor(Math.random()*taunts.length)], true);
+                app.audio.honk();
+            }
+        }
+
+        // --- MAP MANAGER (LEAFLET) ---
+        class MapManager {
+            constructor() {
+                this.map = null;
+                this.marker = null;
+                this.lat = 59.3293; // Default Stockholm
+                this.lng = 18.0686;
+                this.zoom = 16;
+                this.layerStyle = 0; // 0=Dark, 1=Satellite(simulated)
+            }
+
+            init() {
+                this.map = L.map('map-layer', {
+                    zoomControl: false,
+                    attributionControl: false,
+                    zoomAnimation: true
+                }).setView([this.lat, this.lng], this.zoom);
+
+                this.addTiles();
+
+                // Custom Icon
+                const icon = L.divIcon({
+                    className: 'custom-car',
+                    html: '<i class="fas fa-location-arrow driver-icon"></i>',
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                });
+
+                this.marker = L.marker([this.lat, this.lng], {icon: icon}).addTo(this.map);
+
+                // Get Real GPS
+                if(navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(pos => {
+                        this.lat = pos.coords.latitude;
+                        this.lng = pos.coords.longitude;
+                        this.updatePosition(0, 0);
+                    });
+                }
+            }
+
+            addTiles() {
+                // OpenStreetMap (High contrast via CSS)
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(this.map);
+            }
+
+            updatePosition(latDelta, lngDelta, heading) {
+                this.lat += latDelta;
+                this.lng += lngDelta;
+                const newPos = [this.lat, this.lng];
+                
+                // Smooth Pan
+                this.map.panTo(newPos, {animate: false});
+                this.marker.setLatLng(newPos);
+                
+                // Rotate Icon
+                const el = document.querySelector('.driver-icon');
+                if(el) el.style.transform = `rotate(${heading - 45}deg)`;
+            }
+
+            toggleLayer() {
+                const mapEl = document.getElementById('map-layer');
+                this.layerStyle = this.layerStyle === 0 ? 1 : 0;
+                // Simple CSS filter toggle for variety
+                if(this.layerStyle === 1) {
+                    mapEl.style.filter = "invert(0%) hue-rotate(0deg)"; // Normalish
+                    app.voice.speak("Sätter på Satellite View.");
+                } else {
+                    mapEl.style.filter = ""; // Back to dark/inverted
+                    app.voice.speak("Dark Mode aktiverat.");
+                }
+            }
+        }
+
+        // --- MAIN APP CONTROLLER ---
+        class AbdiOS {
+            constructor() {
+                this.audio = new AudioManager();
+                this.voice = new VoiceManager();
+                this.map = new MapManager();
+                
+                // Physics State
+                this.rpm = 800;
+                this.speed = 0;
+                this.gear = 0; // 0=N
+                this.gasPedal = false;
+                this.autoMode = false;
+                this.distance = 0;
+                this.heading = 0;
+                
+                // Loop
+                this.lastTime = 0;
+            }
+
+            start() {
+                gsap.to("#boot", { opacity: 0, duration: 0.8, onComplete: () => {
+                    document.getElementById('boot').style.display = 'none';
+                }});
+                
+                this.audio.ignite();
+                this.map.init();
+                this.voice.speak("Systemet är redo. Välkommen till Abdi O.S Version 8.");
+                
+                requestAnimationFrame((t) => this.loop(t));
+            }
+
+            gas(isDown) {
+                this.gasPedal = isDown;
+            }
+
+            shift(dir) {
+                if(this.autoMode && dir !== 0) return; // Locked in auto
+                const prev = this.gear;
+                if(dir === 1 && this.gear < 6) this.gear++;
+                if(dir === -1 && this.gear > 0) this.gear--;
+                
+                if(prev !== this.gear) {
+                    // RPM Matching logic
+                    this.rpm = dir === 1 ? this.rpm * 0.6 : this.rpm * 1.3;
+                    this.voice.speak(this.gear === 0 ? "Friläge" : `Växel ${this.gear}`);
+                }
+            }
+
+            toggleAuto() {
+                this.autoMode = !this.autoMode;
+                const btn = document.getElementById('auto-btn');
+                if(this.autoMode) {
+                    btn.innerText = "AUTO";
+                    btn.classList.add('text-green-400', 'border-green-500');
+                    this.voice.speak("Lat-mode aktiverat. Jag växlar.");
+                } else {
+                    btn.innerText = "MANUAL";
+                    btn.classList.remove('text-green-400', 'border-green-500');
+                    this.voice.speak("Manuell låda. Lycka till.");
+                }
+            }
+
+            // PHYSICS LOOP
+            loop(timestamp) {
+                const dt = (timestamp - this.lastTime) / 1000;
+                this.lastTime = timestamp;
+
+                // 1. RPM Logic
+                if(this.gasPedal) {
+                    if(this.gear === 0) this.rpm += 300; // Free rev
+                    else this.rpm += (150 / this.gear); // Load
+                } else {
+                    this.rpm -= 100; // Engine braking
+                }
+                
+                // Limits
+                this.rpm = Math.max(800, Math.min(this.rpm, 9000));
+
+                // 2. Automatic Transmission Logic
+                if(this.autoMode && this.gear > 0) {
+                    if(this.rpm > 7500 && this.gear < 6) { this.gear++; this.rpm *= 0.65; }
+                    if(this.rpm < 2000 && this.gear > 1) { this.gear--; this.rpm *= 1.3; }
+                }
+
+                // 3. Speed Logic
+                let targetSpeed = 0;
+                if(this.gear > 0) targetSpeed = (this.rpm / 8500) * (this.gear * 55); // Max speed calc
+                
+                // Inertia
+                this.speed += (targetSpeed - this.speed) * 0.05;
+                if(this.gear === 0 && !this.gasPedal) this.speed *= 0.99; // Rolling resistance
+
+                // 4. Update Systems
+                this.audio.updateRPM(this.rpm);
+                this.updateVisuals();
+                this.updatePosition();
+
+                // 5. Random Abdi Commentary
+                if(Math.random() > 0.998) this.abdiLogic();
+
+                requestAnimationFrame((t) => this.loop(t));
+            }
+
+            updatePosition() {
+                if(this.speed < 1) return;
+                
+                // Simulate movement (North-East roughly)
+                const moveFactor = 0.0000005 * this.speed;
+                // Add slight curve based on time to simulate turning
+                const curve = Math.sin(Date.now() / 2000) * 0.5; 
+                this.heading += curve;
+                
+                this.map.updatePosition(moveFactor, moveFactor + (curve * 0.000001), this.heading * 10);
+            }
+
+            updateVisuals() {
+                // DOM Updates
+                document.getElementById('speed-ui').innerText = Math.floor(this.speed);
+                document.getElementById('gear-ui').innerText = this.gear === 0 ? 'N' : this.gear;
+                
+                // RPM Bar color
+                const bar = document.getElementById('rpm-bar');
+                const pct = (this.rpm / 9000) * 100;
+                bar.style.width = pct + '%';
+                
+                // Speed Glow / Redline
+                const speedUi = document.getElementById('speed-ui');
+                if(this.rpm > 8000) speedUi.classList.add('redline-glow');
+                else speedUi.classList.remove('redline-glow');
+
+                // Nitro Warp Effect
+                if(this.speed > 200) document.body.classList.add('nitro-active');
+                else document.body.classList.remove('nitro-active');
+            }
+
+            abdiLogic() {
+                // Contextual commentary
+                if(this.speed > 250) this.voice.speak("Mannen sänka farten, Aina har helikopter!");
+                else if(this.rpm > 8500) this.voice.speak("Du dödar motorn habibi, växla!");
+                else if(this.speed < 10 && this.gear > 0) this.voice.speak("Sover du? Gasa!");
+                else if(this.speed > 100 && this.speed < 150) this.voice.speak("Vi glider fint nu.");
+            }
+        }
+
+        // INIT
+        const app = new AbdiOS();
+
+    </script>
+</body>
+</html>
